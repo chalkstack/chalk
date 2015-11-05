@@ -12,7 +12,7 @@ class TableTask():
         self.timestamp = None
         self.status = 0  # -1: fail, 0: unprocessed, 1: successful
         self.count = 0
-    def execute(self, engine, sqlalchemy_cnxnstr):
+    def execute(self, engine, sqlalchemy_cnxnstr, notags=False ):
         headers = {'Content-Type': 'application/json'}
         data = {'cnxn_details': self.table.cnxn_details,
                 'table_name': self.table.table_name,
@@ -21,7 +21,7 @@ class TableTask():
                 'where': self.table.where,
                 'vchunks': self.table.vchunks,
                 'sqlalchemy_cnxnstr': sqlalchemy_cnxnstr,
-                'tag': engine.rsplit(':',1)[1]}
+                'tag': '' if notags else engine.rsplit(':',1)[1]}
         url = engine + self.table.SAPNODE_ROUTE
         res = requests.post(url=url, data=json.dumps(data))
         try:
@@ -38,21 +38,21 @@ class TableTask():
             self.status = 'FAIL'
             self.count = 0
             self.table.count += 0
-        
+
         if self.count + self.ri >= self.table.rmax or self.count < self.n:
             self.table.complete = True
         if self.status == 'OK':
             return True
         return False
-    
+
 class SAPTable():
     PREREQ_MISSING = 0
     PREREQ_PENDING = 1
     PREREQ_SUCCESS = 2
     SAPNODE_ROUTE = '/read'  # POST
     SAPNODE_META_ROUTE = '/meta'   # GET
-    SAP_BUFFER_SIZE = 480
-    
+    SAP_BUFFER_SIZE = 400
+
     def __init__(self, system, auth, table_name, fields=None, r0=0, rmax=1000, chunksize=10000, where=''):
         self.table_name = table_name
         self.fields = fields
@@ -80,7 +80,7 @@ class SAPTable():
                 yield next_task
             else:
                 break
-    
+
     def get_next_task(self):
         if self.ri_next < self.rmax:
             t = TableTask(self, self.ri_next, self.chunksize)
@@ -88,18 +88,18 @@ class SAPTable():
             return t
         else:
             return None
-    
+
     def prerequisites(self, engine, timeout=None):
         js_meta_params = ['cnxn_details','table_name']
         while self.meta_status != self.PREREQ_SUCCESS:
-            if self.meta_status == 1:
+            if self.meta_status == self.PREREQ_PENDING:
                 # wait for metadata task to complete
                 sleep(1)
-            elif self.meta_status == 0:
+            elif self.meta_status == self.PREREQ_MISSING:
                 # fetch the metadata
-                self.meta_status = 1
+                self.meta_status = self.PREREQ_PENDING
                 self.get_meta(engine)
-                self.meta_status = 2
+                self.meta_status = self.PREREQ_SUCCESS
 
     def get_meta(self, engine):
         self.meta_status = self.PREREQ_PENDING
@@ -108,7 +108,11 @@ class SAPTable():
         self.meta = pd.DataFrame(**res.json()).set_index('FIELDNAME')
         self.meta.LENG = self.meta.LENG.astype(int)
         self.meta_status = self.PREREQ_SUCCESS
-        
+        try:
+            self.meta.drop('.INCLUDE', inplace=True)
+        except ValueError:
+            pass
+
         if self.fields==None:
             self.fields = self.meta.index.tolist()
 
@@ -134,7 +138,7 @@ class Worker(Thread):
         self.queue = queue
         self.engine = engine
         self.Daemon = True
-        
+
         self.status = True
         self.processed = []
         self.sqlalchemy_cnxnstr = queue.sqlalchemy_cnxnstr
@@ -143,12 +147,12 @@ class Worker(Thread):
         while True:
             # Get a task from the queue
             task = self.queue.get()
-            
+
             # check the table prerequisites are satisfied
             task.table.prerequisites(self.engine)
-            
+
             # execute the task
-            if task.execute(self.engine, self.sqlalchemy_cnxnstr) == False:
+            if task.execute(self.engine, self.sqlalchemy_cnxnstr, notags = self.queue.notags) == False:
                 self.status = False
             self.processed.append(task)
 
@@ -165,11 +169,12 @@ class Extractor(Queue):
                        'http://172.17.42.1:5102',
                        'http://172.17.42.1:5103'
                        'http://172.17.42.1:5104']
-    def __init__(self, engines=None, start=True, sqlalchemy_cnxnstr='sqlite:///db.sqlite'):
+    def __init__(self, engines=None, start=True, sqlalchemy_cnxnstr='sqlite:///db.sqlite', notags=False):
         Queue.__init__(self)
         self.engines = engines or self.default_engines
         self.tables = []
         self.sqlalchemy_cnxnstr = sqlalchemy_cnxnstr
+        self.notags = notags
         if start:
             self.start()
     def start(self):
@@ -187,7 +192,7 @@ class Extractor(Queue):
                 requests.ConnectionError):
             print('%s is DOWN' % engine)
             return False
-        
+
     def extract(self, table, parallelism=1):
         self.tables.append(table)
         for task in table.seed_tasks(parallelism):

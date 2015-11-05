@@ -1,0 +1,1 @@
+docker run -d -v /media/jake/cksdevs/cksdb/mysql_fas:/var/lib/mysql -p 172.17.42.1:3306:3306 --cap-add NET_ADMIN --name=mysql_fas_750m --memory=750m -e MYSQL_ROOT_PASSWORD=mys mysql:latest

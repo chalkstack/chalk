@@ -1,0 +1,61 @@
+#!/bin/bash
+#Jake Bouma 2015
+
+# READ subcommand
+SUB="$1"
+shift
+if [[ $SUB =~ ^(start|stop|restart)$ ]]; then
+  echo "IPCLUSTER FOR CHALK:"
+  echo "--------------------"
+else
+  echo "Invalid subcommand $SUB" >&2
+  exit 1
+fi
+
+# READ parameters
+NENGINES=2
+while [[ $# > 1 ]]
+do
+key="$1"
+case $key in
+    -n|--n)
+    NENGINES="$2"
+    shift # past argument
+    ;;
+    -e|--env)
+    ENV="$2"
+    shift # past argument
+    ;;
+    -p|--profile-dir)
+    PROFILEDIR="$2"
+    shift # past argument
+    ;;
+    *)
+    echo "unknown argument ignored."
+    ;;
+esac
+shift # past argument or value
+done
+
+
+# RUN sub
+if [ $SUB = start ]; then
+    echo "> Starting ta_cluster with " $NENGINES " Engines."
+    source activate $ENV
+    # start cluster in background.  Stop will also need this option
+    ipcluster start --n=$NENGINES --profile-dir=$PROFILEDIR --daemonize
+    source deactivate
+fi
+if [ $SUB = stop ]; then
+    echo "> Stopping ta_cluster."
+    ipcluster stop --profile-dir=$PROFILEDIR
+fi
+if [ $SUB = restart ]; then
+    echo "> Restarting ta_cluster."
+    ipcluster stop --profile-dir=$PROFILEDIR
+    echo "> Starting ta_cluster with " $NENGINES " Engines."
+    source activate $ENV
+    # start cluster in background.  Stop will also need this option
+    ipcluster start --n=$NENGINES --profile-dir=$PROFILEDIR --daemonize
+    source deactivate
+fi
