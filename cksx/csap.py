@@ -17,7 +17,7 @@ class TableTask():
         self.status = 0  # -1: fail, 0: unprocessed, 1: successful
         self.count = 0
 
-    def execute(self, engine, sqlalchemy_cnxnstr, notags=False):
+    def execute(self, engine, sqlalchemy_cnxnstr=None, notags=False):
         headers = {'Content-Type': 'application/json'}
         data = {'cnxn_details': self.table.cnxn_details,
                 'table_name': self.table.table_name,
@@ -26,7 +26,10 @@ class TableTask():
                 'where': self.table.where,
                 'vchunks': self.table.vchunks,
                 'sqlalchemy_cnxnstr': sqlalchemy_cnxnstr,
-                'tag': '' if notags else engine.rsplit(':', 1)[1]}
+                'tag': '' if notags else engine.rsplit(':', 1)[1],
+                'keep': self.table.keep}
+        if self.table.output_tablename is not None:
+            data['output_tablename'] = self.table.output_tablename
         url = engine + self.table.SAPNODE_ROUTE
         res = requests.post(url=url, data=json.dumps(data))
         try:
@@ -35,6 +38,8 @@ class TableTask():
             self.count = int(msg['COUNT'])
             self.table.count += self.count
             self.timestamp = msg['TIMESTAMP']
+            if 'DATA' in msg:
+                self.table.data.append(msg['DATA'])
         except ValueError:
             print('%s(%d - %d)value error caught trying to parse task \
                    response message.'
@@ -62,7 +67,7 @@ class SAPTable():
     SAP_BUFFER_SIZE = 400
 
     def __init__(self, system, auth, table_name, fields=None, r0=0, rmax=1000,
-                 chunksize=10000, where=''):
+                 chunksize=10000, where='', output_tablename=None, keep=False):
         self.table_name = table_name
         self.fields = fields
         self.cnxn_details = {'ashost': system[0],
@@ -79,6 +84,9 @@ class SAPTable():
         self.count = 0
         self.complete = False
         self.vchunks = None
+        self.data = []
+        self.output_tablename = output_tablename
+        self.keep = keep
 
     def connection_test(self, engine):
         res = requests.post(url=engine + self.SAPNODE_CONNECTION_ROUTE,
@@ -148,6 +156,11 @@ class SAPTable():
             vchunks.append(chunk)
         self.vchunks = vchunks
 
+    def get_downloaded_dataframe(self):
+        dfout = pd.concat([pd.read_json(x, dtype=str)[self.fields] for x in self.data])\
+                .reset_index(drop=True)
+        return dfout
+
 class Worker(Thread):
     def __init__(self, queue, engine):
         Thread.__init__(self)
@@ -186,7 +199,7 @@ class Worker(Thread):
 class Extractor(Queue):
     default_engines = ['http://172.17.42.1:5101',
                        'http://172.17.42.1:5102',
-                       'http://172.17.42.1:5103'
+                       'http://172.17.42.1:5103',
                        'http://172.17.42.1:5104']
 
     def __init__(self, engines=None, start=True,

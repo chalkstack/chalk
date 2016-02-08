@@ -36,6 +36,7 @@ def read():
 def info():
     return Response(sapserver.info(**json.loads(request.data)))
 
+
 if __name__ == '__main__':
     sys.argv[0]
     app.debug = True

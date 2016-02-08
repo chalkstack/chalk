@@ -41,7 +41,8 @@ def get_meta(cnxn_details, table_name):
 
 
 def read(cnxn_details, table_name, vchunks, ri, n, where,
-         sqlalchemy_cnxnstr='sqlite:////home/cks/db.sqlite', tag=''):
+         sqlalchemy_cnxnstr='sqlite:////home/cks/db.sqlite',
+         output_tablename=None, tag='', keep=False):
     with SAP_cnxn(**cnxn_details) as cnxn:
         data = None
         fields = None
@@ -75,10 +76,15 @@ def read(cnxn_details, table_name, vchunks, ri, n, where,
         count = len(df)
 
         # write to sqlite
-        engine = sqlalchemy.create_engine(sqlalchemy_cnxnstr)
-        df.to_sql('csap_' + table_name + tag,
-                  engine, if_exists='append',
-                  chunksize=50000, index=False)
-
-        return json.dumps({'STATUS': 'OK', 'TIMESTAMP': timestamp,
-                           'COUNT': count})
+        jout = {'STATUS': 'FAIL', 'TIMESTAMP': timestamp, 'COUNT': count}
+        if sqlalchemy_cnxnstr is not None:
+            engine = sqlalchemy.create_engine(sqlalchemy_cnxnstr)
+            output_tablename = output_tablename if output_tablename else 'csap_' + table_name + tag
+            df.to_sql(output_tablename,
+                      engine, if_exists='append',
+                      chunksize=50000, index=False)
+            jout['STATUS'] = 'OK'
+        if keep:
+            jout['DATA'] = df.to_json()
+            jout['STATUS'] = 'OK'
+        return json.dumps(jout)
