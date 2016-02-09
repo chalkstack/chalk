@@ -113,7 +113,6 @@ class SAPTable():
             return None
 
     def prerequisites(self, engine, timeout=None):
-        js_meta_params = ['cnxn_details', 'table_name']
         while self.meta_status != self.PREREQ_SUCCESS:
             if self.meta_status == self.PREREQ_PENDING:
                 # wait for metadata task to complete
@@ -152,7 +151,7 @@ class SAPTable():
                 chunk = [field]
             else:
                 chunk.append(field)
-        if chunk != []:
+        if chunk:
             vchunks.append(chunk)
         self.vchunks = vchunks
 
@@ -209,6 +208,7 @@ class Extractor(Queue):
         self.tables = []
         self.sqlalchemy_cnxnstr = sqlalchemy_cnxnstr
         self.notags = notags
+        self.workers = None
         if start:
             self.start()
 
